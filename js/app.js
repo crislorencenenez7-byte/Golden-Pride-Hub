@@ -165,20 +165,6 @@ function sanitize(str = "") {
   return div.innerHTML;
 }
 
-// Convert Firestore Timestamp, JS Date, or date-like value to a Date.
-// Used by the live broadcast system so expiry checks never throw.
-function getDateValue(value) {
-  if (!value) return null;
-  try {
-    if (value.toDate && typeof value.toDate === "function") return value.toDate();
-    if (value instanceof Date) return value;
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? null : date;
-  } catch {
-    return null;
-  }
-}
-
 // Format a Firestore Timestamp or JS Date into a readable string
 function formatDate(timestamp) {
   if (!timestamp) return "";
@@ -210,142 +196,76 @@ function getInitials(name = "") {
 }
 
 /* ---------- Live Admin Broadcasts ----------
-   Admin messages are stored in Firestore `broadcasts`. Every page
-   loads this listener, so an active message can appear immediately
-   in the upper-center even when the user is on another Hub page. */
+   Admin messages are stored in Firestore `broadcasts`.
+   The public home/index page and member dashboard both receive
+   live broadcasts. New messages show as an upper-center alert;
+   recent active messages are also rendered into a feed. */
 (function initLiveBroadcasts(){
-  const MAX_FEED = 12;
-  const seen = new Set();
-  let activeDocs = [];
-  let initialized = false;
+  const MAX_FEED=12;
+  const seen=new Set();
+  let activeDocs=[];
+  let timerMap=new Map();
 
   function ensureFeed(){
-    return document.getElementById("live-broadcast-feed");
-  }
-
-  function sortNewestFirst(docs){
-    return docs.slice().sort((a,b) => {
-      const at = getDateValue(a.createdAt)?.getTime() || 0;
-      const bt = getDateValue(b.createdAt)?.getTime() || 0;
-      return bt - at;
-    });
+    let feed=document.getElementById("live-broadcast-feed");
+    if(!feed)return null;
+    return feed;
   }
 
   function renderFeed(){
-    const feed = ensureFeed();
-    if (!feed) return;
-    const now = Date.now();
-    activeDocs = sortNewestFirst(activeDocs).filter(x => {
-      if (x.active === false) return false;
-      const expires = getDateValue(x.expiresAt);
-      return !expires || expires.getTime() > now;
-    }).slice(0, MAX_FEED);
-
-    feed.innerHTML = activeDocs.length
-      ? activeDocs.map(x => `
-        <article class="live-feed-card glass">
-          <div class="live-feed-icon"><i class="fa-solid fa-bolt"></i></div>
-          <div class="live-feed-body">
-            <div class="live-feed-meta">
-              <strong>${sanitize(x.sender || "Admin")} <span aria-label="verified">✅</span></strong>
-              <time>${formatDate(x.createdAt) || "Just now"}</time>
-            </div>
-            <p>${sanitize(x.message || "")}</p>
-          </div>
-        </article>`).join("")
+    const feed=ensureFeed();
+    if(!feed)return;
+    const now=Date.now();
+    activeDocs=activeDocs
+      .filter(x=>x.active!==false && (!getDateValue(x.expiresAt)||getDateValue(x.expiresAt).getTime()>now))
+      .sort((a,b)=>((b.createdAt?.seconds||0)-(a.createdAt?.seconds||0)))
+      .slice(0,MAX_FEED);
+    feed.innerHTML=activeDocs.length
+      ? activeDocs.map(x=>`<article class="live-feed-card glass"><div class="live-feed-icon"><i class="fa-solid fa-bolt"></i></div><div class="live-feed-body"><div class="live-feed-meta"><strong>${sanitize(x.sender||"Admin")} <span aria-label="verified">✅</span></strong><time>${formatDate(x.createdAt)||"Just now"}</time></div><p>${sanitize(x.message||"")}</p></div></article>`).join("")
       : `<div class="live-feed-empty"><i class="fa-regular fa-bell-slash"></i><span>No live admin messages right now.</span></div>`;
   }
 
-  function renderBroadcast(data){
-    if (!data || data.active === false) return;
-    const expires = getDateValue(data.expiresAt);
-    if (expires && expires.getTime() <= Date.now()) return;
-
-    const duration = Math.max(3000, Number(data.duration) || 8000);
-    let wrap = document.getElementById("top-broadcast");
-    if (!wrap) {
-      wrap = document.createElement("div");
-      wrap.id = "top-broadcast";
-      wrap.className = "top-broadcast";
-      document.body.appendChild(wrap);
-    }
-
-    wrap.innerHTML = `
-      <div class="broadcast-card" role="status" aria-live="polite">
-        <div class="broadcast-check"><i class="fa-solid fa-check"></i></div>
-        <div class="broadcast-body">
-          <strong>${sanitize(data.sender || "Admin")} <span aria-label="verified">✅</span></strong>
-          <p>${sanitize(data.message || "")}</p>
-          <div class="broadcast-progress"><span></span></div>
-        </div>
-        <button class="broadcast-close" aria-label="Close message">×</button>
-      </div>`;
-
-    const bar = wrap.querySelector(".broadcast-progress span");
-    if (bar) bar.style.animationDuration = `${duration}ms`;
+  function renderBroadcast(data,id){
+    if(data.active===false)return;
+    const expires=getDateValue(data.expiresAt);
+    if(expires&&expires.getTime()<=Date.now())return;
+    const duration=Math.max(3000,Number(data.duration)||8000);
+    let wrap=document.getElementById("top-broadcast");
+    if(!wrap){wrap=document.createElement("div");wrap.id="top-broadcast";wrap.className="top-broadcast";document.body.appendChild(wrap)}
+    wrap.innerHTML=`<div class="broadcast-card"><div class="broadcast-check"><i class="fa-solid fa-check"></i></div><div class="broadcast-body"><strong>${sanitize(data.sender||"Admin")} <span aria-label="verified">✅</span></strong><p>${sanitize(data.message||"")}</p><div class="broadcast-progress"><span></span></div></div><button class="broadcast-close" aria-label="Close">×</button></div>`;
+    const bar=wrap.querySelector(".broadcast-progress span");
+    bar.style.animationDuration=`${duration}ms`;
     wrap.classList.add("show");
-
-    const close = () => {
-      wrap.classList.remove("show");
-      clearTimeout(wrap.__timer);
-    };
-    wrap.querySelector(".broadcast-close")?.addEventListener("click", close);
-    clearTimeout(wrap.__timer);
-    wrap.__timer = setTimeout(close, duration);
+    const close=()=>{wrap.classList.remove("show");clearTimeout(wrap.__timer)};
+    wrap.querySelector(".broadcast-close").onclick=close;
+    clearTimeout(wrap.__timer);wrap.__timer=setTimeout(close,duration);
   }
 
   function subscribe(){
-    if (typeof firebase === "undefined" || typeof db === "undefined") return;
-
-    try {
-      db.collection("broadcasts").limit(25).onSnapshot(
-        snap => {
-          const docs = snap.docs.map(d => ({id:d.id, ...d.data()}));
-          activeDocs = docs;
-          renderFeed();
-
-          if (!initialized) {
-            // On first load, show the newest currently-active broadcast so
-            // opening any Hub page/tab still gives the user the message.
-            const newest = sortNewestFirst(docs).find(d => {
-              if (d.active === false) return false;
-              const expires = getDateValue(d.expiresAt);
-              return !expires || expires.getTime() > Date.now();
-            });
-            if (newest) {
-              seen.add(newest.id);
-              renderBroadcast(newest);
-            }
-            docs.forEach(d => seen.add(d.id));
-            initialized = true;
-            return;
+    if(typeof firebase==="undefined"||typeof db==="undefined")return;
+    try{
+      db.collection("broadcasts").limit(25).onSnapshot(snap=>{
+        const docs=snap.docs.map(d=>({id:d.id,...d.data()}));
+        activeDocs=docs;
+        renderFeed();
+        docs.forEach(d=>{
+          const created=d.createdAt?.seconds||0;
+          const key=d.id+":"+created;
+          if(!seen.has(key)){
+            seen.add(key);
+            if(d.createdAt || snap.metadata.fromCache===false) renderBroadcast(d,d.id);
           }
-
-          snap.docChanges().forEach(change => {
-            if (change.type === "added" && !seen.has(change.doc.id)) {
-              const data = change.doc.data();
-              seen.add(change.doc.id);
-              renderBroadcast(data);
-            }
-          });
-
-          if (seen.size > 100) {
-            const keep = new Set(docs.map(d => d.id));
-            seen.forEach(id => { if (!keep.has(id)) seen.delete(id); });
-          }
-        },
-        err => {
-          console.warn("Broadcast listener unavailable:", err);
-        }
-      );
-    } catch (e) {
-      console.warn("Broadcast listener unavailable:", e);
-    }
+        });
+        // Keep the recent-message set bounded.
+        if(seen.size>100){const keep=new Set(docs.map(d=>d.id+":"+(d.createdAt?.seconds||0)));seen.forEach(k=>{if(!keep.has(k))seen.delete(k)})}
+      },()=>{renderFeed();});
+    }catch(e){console.warn("Broadcast listener unavailable",e)}
   }
 
-  document.addEventListener("DOMContentLoaded", () => {
+  document.addEventListener("DOMContentLoaded",()=>{
     renderFeed();
     subscribe();
-    setInterval(renderFeed, 30000);
+    // Re-check expiry so old broadcasts disappear without a Firestore write.
+    setInterval(renderFeed,30000);
   });
 })();
