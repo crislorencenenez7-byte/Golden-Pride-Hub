@@ -29,6 +29,15 @@ auth.onAuthStateChanged(async (user) => {
   loadDashboardStats();
 });
 
+// The public Home page must load its announcement preview even when no
+// Firebase user is signed in. Authenticated dashboard pages will simply
+// call this safely as well.
+document.addEventListener("DOMContentLoaded", () => {
+  if (document.getElementById("latest-announcement")) {
+    loadRecentAnnouncementPreview();
+  }
+});
+
 /* ---------- Dashboard Summary Cards ---------- */
 async function loadDashboardStats() {
   const statsEls = {
@@ -76,11 +85,23 @@ async function loadRecentAnnouncementPreview() {
   }
 
   try {
-    const snap = await db
-      .collection(COLLECTIONS.ANNOUNCEMENTS)
-      .orderBy("createdAt", "desc")
-      .limit(1)
-      .get();
+    let snap;
+    try {
+      snap = await db
+        .collection(COLLECTIONS.ANNOUNCEMENTS)
+        .orderBy("createdAt", "desc")
+        .limit(5)
+        .get();
+    } catch (queryErr) {
+      // Fallback for older documents/index states. Sort locally.
+      const fallback = await db.collection(COLLECTIONS.ANNOUNCEMENTS).limit(20).get();
+      const docs = fallback.docs.slice().sort((a,b) => {
+        const at = getDateValue(a.data().createdAt)?.getTime() || 0;
+        const bt = getDateValue(b.data().createdAt)?.getTime() || 0;
+        return bt - at;
+      }).slice(0, 1);
+      snap = { empty: docs.length === 0, docs };
+    }
 
     if (snap.empty) {
       container.innerHTML = `<p class="empty-state">No announcements yet.</p>`;
