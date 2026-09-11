@@ -115,7 +115,7 @@ function maybeShowBrowserNotification(title, body) {
   try {
     new Notification(`📢 ${title}`, {
       body: body.substring(0, 120),
-      icon: "assets/icons/icon-192.png"
+      icon: "assets/icons/icon-192-1.png"
     });
   } catch (err) {
     // Some browsers restrict Notification() outside a service worker context
