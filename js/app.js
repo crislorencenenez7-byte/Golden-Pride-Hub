@@ -75,7 +75,7 @@ function showToast(message, type = "info") {
   toast.className = `toast toast-${type}`;
   toast.innerHTML = `
     <i class="fa-solid ${icons[type] || icons.info}"></i>
-    <span>${sanitize(message)}</span>
+    <span>${message}</span>
   `;
   container.appendChild(toast);
 
@@ -156,61 +156,6 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 });
 
-/* ---------- v4.2 UX upgrades ---------- */
-(function initV42UX(){
-  const start = () => {
-    if (!document.getElementById("connection-status")) {
-      const status = document.createElement("div");
-      status.id = "connection-status";
-      document.body.appendChild(status);
-      updateConnectionStatus();
-    }
-    injectCommandPalette();
-    checkScheduledUpdate();
-  };
-  document.addEventListener("DOMContentLoaded", start);
-
-  function updateConnectionStatus(){
-    const el=document.getElementById("connection-status"); if(!el)return;
-    const online=navigator.onLine;
-    el.className=online?"online":"offline";
-    el.innerHTML=`<i class="fa-solid fa-circle"></i><span>${online?"Online":"Offline"}</span>`;
-  }
-  window.addEventListener("online",updateConnectionStatus);
-  window.addEventListener("offline",updateConnectionStatus);
-
-  function injectCommandPalette(){
-    if(document.getElementById("command-palette") || !document.querySelector(".sidebar"))return;
-    const overlay=document.createElement("div"); overlay.id="command-palette"; overlay.className="command-overlay";
-    overlay.innerHTML=`<div class="command-box glass" role="dialog" aria-modal="true" aria-label="Quick navigation">
-      <div class="command-head"><i class="fa-solid fa-magnifying-glass"></i><input id="global-command-input" autocomplete="off" placeholder="Search pages…"><kbd>ESC</kbd></div>
-      <div id="command-results" class="command-results"></div><p class="command-hint">Press <kbd>Ctrl</kbd> + <kbd>K</kbd> to open quick search.</p></div>`;
-    document.body.appendChild(overlay);
-    const routes=[
-      ["Dashboard","dashboard.html","fa-gauge"],["Announcements","announcements.html","fa-bullhorn"],["Members","members.html","fa-users"],
-      ["Events","events.html","fa-calendar-days"],["Gallery","gallery.html","fa-images"],["Achievements","achievements.html","fa-trophy"],["Profile","profile.html","fa-user"]
-    ];
-    if(document.querySelector('a[href="admin.html"]'))routes.push(["Admin Panel","admin.html","fa-user-shield"]);
-    const input=overlay.querySelector("#global-command-input"), results=overlay.querySelector("#command-results");
-    const render=()=>{const q=input.value.trim().toLowerCase(); const items=routes.filter(r=>r[0].toLowerCase().includes(q));
-      results.innerHTML=items.map(r=>`<a class="command-item" href="${r[1]}"><i class="fa-solid ${r[2]}"></i><span>${sanitize(r[0])}</span><small>Open</small></a>`).join("")||`<div class="command-empty">No matching page.</div>`;};
-    input.addEventListener("input",render);
-    overlay.addEventListener("click",e=>{if(e.target===overlay)overlay.classList.remove("show")});
-    document.addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();overlay.classList.add("show");input.focus();render()} if(e.key==="Escape")overlay.classList.remove("show")});
-  }
-
-  function checkScheduledUpdate(){
-    fetch(`update.json?ts=${Date.now()}`,{cache:"no-store"}).then(r=>r.ok?r.json():null).then(d=>{
-      if(!d || d.status!=="scheduled" || !d.version)return;
-      const releaseAt=d.releaseDate&&d.releaseTime?new Date(`${d.releaseDate}T${d.releaseTime}:00`):null;
-      if(releaseAt && releaseAt.getTime()<=Date.now())return;
-      const banner=document.createElement("div"); banner.className="release-banner";
-      banner.innerHTML=`<div><i class="fa-solid fa-bolt"></i><span><strong>Version ${sanitize(d.version)}</strong> — ${sanitize(d.updateName||"Scheduled update")}</span></div><button aria-label="Dismiss">×</button>`;
-      banner.querySelector("button").onclick=()=>banner.remove(); document.body.prepend(banner);
-    }).catch(()=>{});
-  }
-})();
-
 /* ---------- Helpers ---------- */
 
 // Escape user-generated text before inserting into innerHTML (basic XSS guard)
@@ -224,7 +169,6 @@ function sanitize(str = "") {
 function formatDate(timestamp) {
   if (!timestamp) return "";
   const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleDateString("en-PH", {
     year: "numeric",
     month: "long",
@@ -250,3 +194,78 @@ function getInitials(name = "") {
     .substring(0, 2)
     .toUpperCase();
 }
+
+/* ---------- Live Admin Broadcasts ----------
+   Admin messages are stored in Firestore `broadcasts`.
+   The public home/index page and member dashboard both receive
+   live broadcasts. New messages show as an upper-center alert;
+   recent active messages are also rendered into a feed. */
+(function initLiveBroadcasts(){
+  const MAX_FEED=12;
+  const seen=new Set();
+  let activeDocs=[];
+  let timerMap=new Map();
+
+  function ensureFeed(){
+    let feed=document.getElementById("live-broadcast-feed");
+    if(!feed)return null;
+    return feed;
+  }
+
+  function renderFeed(){
+    const feed=ensureFeed();
+    if(!feed)return;
+    const now=Date.now();
+    activeDocs=activeDocs
+      .filter(x=>x.active!==false && (!getDateValue(x.expiresAt)||getDateValue(x.expiresAt).getTime()>now))
+      .sort((a,b)=>((b.createdAt?.seconds||0)-(a.createdAt?.seconds||0)))
+      .slice(0,MAX_FEED);
+    feed.innerHTML=activeDocs.length
+      ? activeDocs.map(x=>`<article class="live-feed-card glass"><div class="live-feed-icon"><i class="fa-solid fa-bolt"></i></div><div class="live-feed-body"><div class="live-feed-meta"><strong>${sanitize(x.sender||"Admin")} <span aria-label="verified">✅</span></strong><time>${formatDate(x.createdAt)||"Just now"}</time></div><p>${sanitize(x.message||"")}</p></div></article>`).join("")
+      : `<div class="live-feed-empty"><i class="fa-regular fa-bell-slash"></i><span>No live admin messages right now.</span></div>`;
+  }
+
+  function renderBroadcast(data,id){
+    if(data.active===false)return;
+    const expires=getDateValue(data.expiresAt);
+    if(expires&&expires.getTime()<=Date.now())return;
+    const duration=Math.max(3000,Number(data.duration)||8000);
+    let wrap=document.getElementById("top-broadcast");
+    if(!wrap){wrap=document.createElement("div");wrap.id="top-broadcast";wrap.className="top-broadcast";document.body.appendChild(wrap)}
+    wrap.innerHTML=`<div class="broadcast-card"><div class="broadcast-check"><i class="fa-solid fa-check"></i></div><div class="broadcast-body"><strong>${sanitize(data.sender||"Admin")} <span aria-label="verified">✅</span></strong><p>${sanitize(data.message||"")}</p><div class="broadcast-progress"><span></span></div></div><button class="broadcast-close" aria-label="Close">×</button></div>`;
+    const bar=wrap.querySelector(".broadcast-progress span");
+    bar.style.animationDuration=`${duration}ms`;
+    wrap.classList.add("show");
+    const close=()=>{wrap.classList.remove("show");clearTimeout(wrap.__timer)};
+    wrap.querySelector(".broadcast-close").onclick=close;
+    clearTimeout(wrap.__timer);wrap.__timer=setTimeout(close,duration);
+  }
+
+  function subscribe(){
+    if(typeof firebase==="undefined"||typeof db==="undefined")return;
+    try{
+      db.collection("broadcasts").limit(25).onSnapshot(snap=>{
+        const docs=snap.docs.map(d=>({id:d.id,...d.data()}));
+        activeDocs=docs;
+        renderFeed();
+        docs.forEach(d=>{
+          const created=d.createdAt?.seconds||0;
+          const key=d.id+":"+created;
+          if(!seen.has(key)){
+            seen.add(key);
+            if(d.createdAt || snap.metadata.fromCache===false) renderBroadcast(d,d.id);
+          }
+        });
+        // Keep the recent-message set bounded.
+        if(seen.size>100){const keep=new Set(docs.map(d=>d.id+":"+(d.createdAt?.seconds||0)));seen.forEach(k=>{if(!keep.has(k))seen.delete(k)})}
+      },()=>{renderFeed();});
+    }catch(e){console.warn("Broadcast listener unavailable",e)}
+  }
+
+  document.addEventListener("DOMContentLoaded",()=>{
+    renderFeed();
+    subscribe();
+    // Re-check expiry so old broadcasts disappear without a Firestore write.
+    setInterval(renderFeed,30000);
+  });
+})();

@@ -10,8 +10,7 @@ let currentUserData = null;
 auth.onAuthStateChanged(async (user) => {
   if (!user) return;
 
-  let snap;
-  try { snap = await db.collection(COLLECTIONS.USERS).doc(user.uid).get(); } catch (err) { console.error("User profile load error:", err); snap = { exists:false, data:()=>({}) }; }
+  const snap = await db.collection(COLLECTIONS.USERS).doc(user.uid).get();
   currentUserData = snap.exists ? snap.data() : { fullname: user.displayName || "Member", role: ROLES.MEMBER };
 
   document.querySelectorAll(".user-fullname").forEach((el) => (el.textContent = currentUserData.fullname));
@@ -42,19 +41,24 @@ async function loadDashboardStats() {
 
   // Only run counts for elements that exist on this page
   if (statsEls.announcements) {
-    try { const c = await db.collection(COLLECTIONS.ANNOUNCEMENTS).get(); statsEls.announcements.textContent = c.size; } catch { statsEls.announcements.textContent = "—"; }
+    const c = await db.collection(COLLECTIONS.ANNOUNCEMENTS).get();
+    statsEls.announcements.textContent = c.size;
   }
   if (statsEls.members) {
-    try { const c = await db.collection(COLLECTIONS.USERS).get(); statsEls.members.textContent = c.size; } catch { statsEls.members.textContent = "—"; }
+    const c = await db.collection(COLLECTIONS.USERS).get();
+    statsEls.members.textContent = c.size;
   }
   if (statsEls.events) {
-    try { const c = await db.collection(COLLECTIONS.EVENTS).get(); statsEls.events.textContent = "" + c.size; } catch { statsEls.events.textContent = "—"; }
+    const c = await db.collection(COLLECTIONS.EVENTS).get();
+    statsEls.events.textContent = c.size;
   }
   if (statsEls.gallery) {
-    try { const c = await db.collection(COLLECTIONS.GALLERY).get(); statsEls.gallery.textContent = c.size; } catch { statsEls.gallery.textContent = "—"; }
+    const c = await db.collection(COLLECTIONS.GALLERY).get();
+    statsEls.gallery.textContent = c.size;
   }
   if (statsEls.achievements) {
-    try { const c = await db.collection(COLLECTIONS.ACHIEVEMENTS).get(); statsEls.achievements.textContent = c.size; } catch { statsEls.achievements.textContent = "—"; }
+    const c = await db.collection(COLLECTIONS.ACHIEVEMENTS).get();
+    statsEls.achievements.textContent = c.size;
   }
 
   loadRecentAnnouncementPreview();
@@ -75,7 +79,7 @@ async function loadRecentAnnouncementPreview() {
     const snap = await db
       .collection(COLLECTIONS.ANNOUNCEMENTS)
       .orderBy("createdAt", "desc")
-      .limit(6)
+      .limit(1)
       .get();
 
     if (snap.empty) {
@@ -83,16 +87,17 @@ async function loadRecentAnnouncementPreview() {
       return;
     }
 
-    const docs = snap.docs.map(d => d.data()).sort((a,b) => Number(!!b.pinned)-Number(!!a.pinned));
-    const doc = docs[0];
-    container.innerHTML = `<div class="announcement-card glass fade-in ${doc.pinned ? "is-pinned" : ""}">
-      ${doc.image ? `<img src="${sanitize(doc.image)}" alt="Announcement image" loading="lazy">` : ""}
-      <div class="announcement-card-body">
-        ${doc.pinned ? `<span class="pin-label"><i class="fa-solid fa-thumbtack"></i> Pinned</span>` : ""}
-        <h3>${sanitize(doc.title || "Announcement")}</h3>
-        <p>${sanitize(doc.content || "").substring(0, 140)}${(doc.content||"").length>140?"…":""}</p>
-        <span class="announcement-meta">${sanitize(doc.author || "Admin")} • ${formatDate(doc.createdAt)}</span>
-      </div></div>`;
+    const doc = snap.docs[0].data();
+    container.innerHTML = `
+      <div class="announcement-card glass fade-in">
+        ${doc.image ? `<img src="${sanitize(doc.image)}" alt="Announcement image" loading="lazy">` : ""}
+        <div class="announcement-card-body">
+          <h3>${sanitize(doc.title)}</h3>
+          <p>${sanitize(doc.content).substring(0, 140)}…</p>
+          <span class="announcement-meta">${sanitize(doc.author)} • ${formatDate(doc.createdAt)}</span>
+        </div>
+      </div>
+    `;
   } catch (err) {
     console.error("Announcement preview error:", err);
     container.innerHTML = `<p class="empty-state">Unable to load announcements.</p>`;
@@ -109,7 +114,7 @@ async function loadMembers(searchTerm = "") {
 
   const members = snap.docs
     .map((d) => d.data())
-    .filter((m) => String(m.fullname || "").toLowerCase().includes(searchTerm.toLowerCase()));
+    .filter((m) => m.fullname.toLowerCase().includes(searchTerm.toLowerCase()));
 
   if (members.length === 0) {
     grid.innerHTML = `<p class="empty-state">No members found.</p>`;
@@ -160,9 +165,6 @@ async function loadEvents() {
     (eventDate >= now ? upcoming : past).push(data);
   });
 
-  const countdownTimers = window.__gphCountdownTimers || (window.__gphCountdownTimers = {});
-  Object.values(countdownTimers).forEach(clearInterval);
-
   const cardHtml = (e, isPast) => `
     <div class="event-card glass fade-in" data-event-id="${e.id}">
       <div class="event-date-badge">
@@ -170,10 +172,10 @@ async function loadEvents() {
         <span class="month">${new Date(e.date?.toDate ? e.date.toDate() : e.date).toLocaleString("en-PH", { month: "short" })}</span>
       </div>
       <div class="event-info">
-        <div class="event-title-row"><h4>${sanitize(e.title || "Event")}</h4>${!isPast ? `<span class="soon-badge" id="soon-${e.id}" style="display:none">Soon</span>` : ""}</div>
+        <h4>${sanitize(e.title)}</h4>
         <p>${sanitize(e.description)}</p>
         <span class="event-location"><i class="fa-solid fa-location-dot"></i> ${sanitize(e.location)}</span>
-        ${!isPast ? `<div class="event-countdown" id="countdown-${e.id}"></div>` : ""}<div class="event-rsvp-row">
+        <div class="event-rsvp-row">
           <span class="rsvp-count" id="rsvp-count-${e.id}"><i class="fa-solid fa-user-group"></i> Loading…</span>
           ${!isPast ? `<button class="btn-icon rsvp-btn" data-event-id="${e.id}"><i class="fa-solid fa-check"></i> RSVP</button>` : ""}
         </div>
@@ -182,21 +184,6 @@ async function loadEvents() {
 
   if (upcomingEl) upcomingEl.innerHTML = upcoming.length ? upcoming.map((e) => cardHtml(e, false)).join("") : `<p class="empty-state">No upcoming events.</p>`;
   if (pastEl) pastEl.innerHTML = past.length ? past.map((e) => cardHtml(e, true)).join("") : `<p class="empty-state">No past events yet.</p>`;
-
-  // Live countdowns for upcoming events
-  upcoming.forEach((e) => {
-    const el = document.getElementById(`countdown-${e.id}`);
-    const soon = document.getElementById(`soon-${e.id}`);
-    const d = e.date?.toDate ? e.date.toDate() : new Date(e.date);
-    const tick = () => {
-      if (!el || Number.isNaN(d.getTime())) return;
-      const ms = d.getTime() - Date.now();
-      if (ms <= 0) { el.textContent = "Starting now"; if(soon)soon.style.display="inline-flex"; return; }
-      const days=Math.floor(ms/86400000), hours=Math.floor(ms%86400000/3600000), mins=Math.floor(ms%3600000/60000), secs=Math.floor(ms%60000/1000);
-      el.innerHTML = `<span>${days}d</span><span>${String(hours).padStart(2,"0")}h</span><span>${String(mins).padStart(2,"0")}m</span><span>${String(secs).padStart(2,"0")}s</span>`;
-      if(soon)soon.style.display = ms < 7*86400000 ? "inline-flex" : "none";
-    }; tick(); countdownTimers[e.id]=setInterval(tick,1000);
-  });
 
   // Load RSVP counts + button state for every event card just rendered
   [...upcoming, ...past].forEach((e) => refreshRsvpUI(e.id));
