@@ -10,10 +10,3 @@
 
 ## Firebase
 Keep your existing Firebase configuration. If your current Firestore rules already contain the broadcast rules, keep them. Otherwise merge the broadcast rules from `FIRESTORE_RULES_V5.2_BROADCAST.txt` into your existing rules rather than replacing the whole ruleset.
-
-## Version 4.3 final fixes
-- Global realtime admin broadcasts appear in the upper-center on every Hub page/tab.
-- Home (`index.html`) announcement preview now loads independently of authentication.
-- Announcement preview has a local-sort fallback for older Firestore data/index states.
-- Service-worker cache was bumped so updated JavaScript is fetched.
-- Use `FIRESTORE_RULES_V4.3_FINAL.txt` for the complete Firestore rules.

@@ -1,14 +1,12 @@
-Golden Pride Hub 4.3 — Broadcast note
+Golden Pride Hub v5.2 — Broadcast Firestore rule
 
-The public Home page (index.html) must be able to read broadcasts.
-The complete rules are in FIRESTORE_RULES_V4.3_FINAL.txt.
-
-Required block:
+The home page (index.html) is public, so broadcasts must be readable without login.
+Merge this block into your existing Firestore rules; do NOT replace your complete rules blindly.
 
 match /broadcasts/{broadcastId} {
   allow read: if true;
-  allow create, update, delete: if isAdmin();
+  allow create, update, delete: if request.auth != null
+    && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
 }
 
-Only authenticated admins whose users/{uid}.role is exactly "admin"
-can create, update, or delete broadcasts.
+This allows everyone to SEE admin broadcasts, while only admins can create/update/delete them.
