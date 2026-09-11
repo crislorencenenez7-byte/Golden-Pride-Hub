@@ -1,0 +1,99 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+    }
+
+    // =========================
+    // USERS
+    // =========================
+    match /users/{userId} {
+      allow read: if signedIn();
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId) || isAdmin();
+      allow delete: if isAdmin();
+
+      match /notifications/{notificationId} {
+        allow read, create, update, delete: if isOwner(userId) || isAdmin();
+      }
+    }
+
+    // =========================
+    // ANNOUNCEMENTS
+    // Public read is required by index.html.
+    // Only admins can create/edit/delete announcements.
+    // =========================
+    match /announcements/{announcementId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+
+      // Comments used by announcements.js
+      match /comments/{commentId} {
+        allow read: if signedIn();
+        allow create: if signedIn()
+          && request.resource.data.uid == request.auth.uid;
+        allow update, delete: if isAdmin()
+          || (signedIn() && resource.data.uid == request.auth.uid);
+      }
+    }
+
+    // =========================
+    // EVENTS
+    // =========================
+    match /events/{eventId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+
+      match /rsvps/{userId} {
+        allow read: if signedIn();
+        allow create, update, delete: if isOwner(userId) || isAdmin();
+      }
+    }
+
+    // =========================
+    // GALLERY
+    // =========================
+    match /gallery/{galleryId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // =========================
+    // ACHIEVEMENTS
+    // =========================
+    match /achievements/{achievementId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // =========================
+    // GLOBAL LIVE BROADCASTS
+    // Public read lets index.html and every page receive the
+    // realtime upper-center message. Only admins can write.
+    // =========================
+    match /broadcasts/{broadcastId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // =========================
+    // DEFAULT DENY
+    // =========================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

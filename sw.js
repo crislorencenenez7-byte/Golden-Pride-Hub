@@ -4,7 +4,7 @@
    app shell (static files). Firebase calls always go to network.
    ============================================================ */
 
-const CACHE_NAME = "golden-pride-hub-v1";
+const CACHE_NAME = "golden-pride-hub-v4-3-1";
 
 const APP_SHELL = [
   "index.html",
@@ -19,6 +19,11 @@ const APP_SHELL = [
   "js/firebase-config.js",
   "js/auth.js",
   "js/dashboard.js",
+  "js/notifications.js",
+  "js/announcements.js",
+  "css/modern-v5.css",
+  "css/modern-v42.css",
+  "css/admin.css",
   "manifest.json"
 ];
 
